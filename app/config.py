@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     """Configuración de la aplicación desde variables de entorno."""
     
     # Google Drive
-    google_client_secret_file: str = "client_secret.json"
     google_token_file: str = "token.json"
     
     # Supabase
@@ -23,6 +22,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
 
 
 settings = Settings()

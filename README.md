@@ -16,9 +16,7 @@ Esta API automatiza el proceso de:
 - **Python 3.11.0** (recomendado y especificado en `runtime.txt`). Python 3.14 tiene problemas de compatibilidad con algunas dependencias.
 - Cuenta de Google con acceso a Google Drive API
 - Proyecto de Supabase configurado
-- Archivo `client_secret.json` de Google OAuth Client
-- Token de autenticación de Google Drive (se genera automáticamente)
-
+- Archivo token OAuth (`token.json`) con `refresh_token` habilitado
 **⚠️ IMPORTANTE - Versión de Python**: Este proyecto está configurado para usar **Python 3.11.0** (ver `runtime.txt`). Python 3.14 tiene problemas de compatibilidad con `httpcore` y otras dependencias. Si estás usando Python 3.14, se recomienda crear un nuevo entorno virtual con Python 3.11:
 
 ```bash
@@ -79,7 +77,6 @@ Edita `.env` con tus credenciales:
 
 ```env
 # Google Drive Configuration
-GOOGLE_CLIENT_SECRET_FILE=client_secret.json
 GOOGLE_TOKEN_FILE=token.json
 
 # Supabase Configuration
@@ -92,11 +89,12 @@ ENVIRONMENT=development
 LOG_LEVEL=INFO
 ```
 
-### 6. Configurar Google Drive OAuth
+### 6. Configurar autenticacion de Google Drive
 
-1. Coloca tu archivo `client_secret.json` en la raíz del proyecto
-2. La primera vez que ejecutes la API, se abrirá el navegador para autenticación
-3. El token se guardará automáticamente en `token.json`
+1. Genera `token.json` una sola vez en entorno local/controlado.
+2. Verifica que el archivo incluya `refresh_token`, `client_id`, `client_secret`, `token_uri` y `scopes`.
+3. Configura `GOOGLE_TOKEN_FILE` con la ruta del token que estara disponible en runtime.
+4. En produccion no se ejecuta flujo OAuth interactivo (no navegador, no servidor HTTP local).
 
 ## Uso Local
 
@@ -214,8 +212,7 @@ git push
 
 En el dashboard de Render, ve a "Environment" y agrega:
 
-- `GOOGLE_CLIENT_SECRET_FILE` - Contenido del archivo JSON (o sube el archivo)
-- `GOOGLE_TOKEN_FILE` - Se generará automáticamente
+- `GOOGLE_TOKEN_FILE` - Ruta a un `token.json` existente y disponible en runtime
 - `SUPABASE_PROJECT_ID` - Tu project ID de Supabase
 - `SUPABASE_URL` - URL de tu proyecto Supabase
 - `SUPABASE_KEY` - Tu API key de Supabase
@@ -299,7 +296,6 @@ Los logs se configuran según `LOG_LEVEL` en `.env`. Los logs incluyen:
 
 - **No commitear** archivos sensibles:
   - `.env`
-  - `client_secret.json`
   - `token.json`
 - Usar variables de entorno en producción
 - Configurar CORS apropiadamente en producción
@@ -317,6 +313,18 @@ Los logs se configuran según `LOG_LEVEL` en `.env`. Los logs incluyen:
 ### Error: "Supabase no está configurado"
 - Verifica que las variables `SUPABASE_URL` y `SUPABASE_KEY` estén configuradas
 - La API continuará funcionando pero no actualizará Supabase
+
+### Error: "No se encontro el archivo de token"
+- Verifica que `GOOGLE_TOKEN_FILE` apunte a un archivo existente en el entorno de ejecucion
+- Confirma permisos de lectura sobre el archivo
+
+### Error: "Credenciales OAuth invalidas o sin refresh_token"
+- Regenera `token.json` asegurando `access_type=offline` para obtener `refresh_token`
+- Verifica que los `scopes` del token incluyan `https://www.googleapis.com/auth/drive`
+
+### Error: "No se pudo refrescar el token OAuth"
+- Reautoriza la cuenta y reemplaza `token.json` por uno vigente
+- Revisa conectividad saliente a `https://oauth2.googleapis.com/token`
 
 ## Licencia
 

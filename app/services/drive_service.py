@@ -4,14 +4,9 @@ import json
 import re
 import logging
 from typing import Optional, Dict, Any, List, Tuple
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
-import threading
-import time
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow, Flow
 from googleapiclient.discovery import build
 
 from app.config import settings
@@ -22,28 +17,10 @@ logger = logging.getLogger(__name__)
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
-class OAuthCallbackHandler(BaseHTTPRequestHandler):
-    """Manejador para recibir el callback de OAuth."""
-    authorization_response = None
-    
-    def do_GET(self):
-        """Maneja la solicitud GET del callback."""
-        OAuthCallbackHandler.authorization_response = self.path
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write(b'<html><body><h1>Autorizacion exitosa!</h1><p>Puedes cerrar esta ventana.</p></body></html>')
-    
-    def log_message(self, format, *args):
-        """Suprime los mensajes de log del servidor."""
-        pass
-
-
 class DriveService:
     """Servicio para interactuar con Google Drive API."""
     
-    def __init__(self, client_secret_file: Optional[str] = None, token_file: Optional[str] = None):
-        self.client_secret_file = client_secret_file or settings.google_client_secret_file
+    def __init__(self, token_file: Optional[str] = None):
         self.token_file = token_file or settings.google_token_file
         self.service = None
     
@@ -51,63 +28,70 @@ class DriveService:
         """Construye y devuelve el cliente de Google Drive API v3 autenticado."""
         if self.service:
             return self.service
-            
-        creds = None
-        
-        if os.path.exists(self.token_file):
+
+        if not os.path.exists(self.token_file):
+            error_msg = (
+                f"No se encontro el archivo de token en '{self.token_file}'. "
+                "Configura GOOGLE_TOKEN_FILE con un token OAuth valido para produccion."
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
+        try:
             creds = Credentials.from_authorized_user_file(self.token_file, SCOPES)
-        
+        except Exception as exc:
+            error_msg = (
+                f"No se pudo cargar el token OAuth desde '{self.token_file}'. "
+                "Verifica formato JSON y permisos del archivo."
+            )
+            logger.error(f"{error_msg} Error: {exc}")
+            raise RuntimeError(error_msg) from exc
+
         if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                with open(self.client_secret_file, 'r') as f:
-                    client_config = json.load(f)
-                
-                if 'web' in client_config:
-                    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
-                    flow = Flow.from_client_secrets_file(self.client_secret_file, SCOPES)
-                    redirect_uri = client_config['web'].get('redirect_uris', ['http://localhost:8000/oauth/callback'])[0]
-                    flow.redirect_uri = redirect_uri
-                    
-                    parsed_uri = urlparse(redirect_uri)
-                    port = parsed_uri.port or 8000
-                    
-                    authorization_url, state = flow.authorization_url(
-                        access_type='offline',
-                        include_granted_scopes='true'
+            if creds and creds.refresh_token:
+                logger.info("Token invalido detectado. Intentando refresh OAuth.")
+                try:
+                    creds.refresh(Request())
+                except Exception as exc:
+                    error_msg = (
+                        "No se pudo refrescar el token OAuth. "
+                        "Regenera token.json con refresh_token valido."
                     )
-                    
-                    server = HTTPServer(('localhost', port), OAuthCallbackHandler)
-                    server_thread = threading.Thread(target=server.serve_forever)
-                    server_thread.daemon = True
-                    server_thread.start()
-                    
-                    logger.info(f'Por favor, visita esta URL para autorizar: {authorization_url}')
-                    
-                    max_wait_time = 300
-                    elapsed_time = 0
-                    while OAuthCallbackHandler.authorization_response is None:
-                        time.sleep(0.5)
-                        elapsed_time += 0.5
-                        if elapsed_time >= max_wait_time:
-                            server.shutdown()
-                            raise TimeoutError("No se recibió el callback de autorización a tiempo")
-                    
-                    full_response = f'http://localhost:{port}{OAuthCallbackHandler.authorization_response}'
-                    flow.fetch_token(authorization_response=full_response)
-                    creds = flow.credentials
-                    server.shutdown()
-                else:
-                    flow = InstalledAppFlow.from_client_secrets_file(self.client_secret_file, SCOPES)
-                    creds = flow.run_local_server(port=0, open_browser=True)
-            
-            with open(self.token_file, 'w') as token:
-                token.write(creds.to_json())
-        
-        self.service = build("drive", "v3", credentials=creds)
+                    logger.error(f"{error_msg} Error: {exc}")
+                    raise RuntimeError(error_msg) from exc
+
+                try:
+                    with open(self.token_file, "w", encoding="utf-8") as token:
+                        token.write(creds.to_json())
+                except Exception as exc:
+                    error_msg = (
+                        f"Token refrescado, pero no se pudo persistir en '{self.token_file}'. "
+                        "Verifica permisos de escritura."
+                    )
+                    logger.error(f"{error_msg} Error: {exc}")
+                    raise RuntimeError(error_msg) from exc
+            else:
+                error_msg = (
+                    "Credenciales OAuth invalidas o sin refresh_token. "
+                    "No hay fallback interactivo habilitado en produccion."
+                )
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+        if not creds.valid:
+            error_msg = "Las credenciales OAuth siguen invalidas despues del refresh."
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
+        try:
+            self.service = build("drive", "v3", credentials=creds)
+        except Exception as exc:
+            error_msg = "No se pudo inicializar el cliente de Google Drive API."
+            logger.error(f"{error_msg} Error: {exc}")
+            raise RuntimeError(error_msg) from exc
+
         return self.service
-    
+
     def find_shared_drive_by_name(self, drive_name: str) -> Optional[str]:
         """Busca un Shared Drive por nombre y retorna su ID."""
         service = self.get_service()
@@ -626,4 +610,3 @@ class DriveService:
                         vehiculo['id_folder'] = mapa_vehiculos[nombre]
         
         return json_final
-
