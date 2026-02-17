@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import carpetas
-from app.config import settings
+from app.config import ENV_FILE_PATH, settings
 
 # Configurar logging
 logging.basicConfig(
@@ -13,6 +13,13 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+logger.info(
+    "Config carga inicial: SUPABASE_URL=%s SUPABASE_KEY=%s ENV_FILE=%s exists=%s",
+    bool(settings.supabase_url),
+    bool(settings.supabase_key),
+    ENV_FILE_PATH,
+    ENV_FILE_PATH.exists(),
+)
 
 app = FastAPI(
     title="API Crear Carpetas Solicitud Acreditación",

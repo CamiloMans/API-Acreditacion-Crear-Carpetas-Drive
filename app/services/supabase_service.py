@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 from supabase import Client, create_client
 
-from app.config import settings
+from app.config import ENV_FILE_PATH, settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +17,34 @@ class SupabaseService:
         self.supabase_url = supabase_url or settings.supabase_url
         self.supabase_key = supabase_key or settings.supabase_key
         self.supabase: Optional[Client] = None
+        self.config_diagnostico = self._build_config_diagnostico()
 
         if self.supabase_url and self.supabase_key:
-            self.supabase = create_client(self.supabase_url, self.supabase_key)
+            try:
+                self.supabase = create_client(self.supabase_url, self.supabase_key)
+            except Exception as error:
+                self.config_diagnostico["create_client_error"] = str(error)
+                logger.error(f"No se pudo crear cliente Supabase: {error}")
+
+    @staticmethod
+    def _mask_url(value: Optional[str]) -> Optional[str]:
+        """Entrega una vista parcial de la URL sin exponer datos sensibles."""
+        if not value:
+            return None
+        if len(value) <= 12:
+            return value
+        return f"{value[:8]}...{value[-4:]}"
+
+    def _build_config_diagnostico(self) -> Dict[str, Any]:
+        """Genera diagnostico de configuracion sin exponer secretos."""
+        return {
+            "supabase_url_configurada": bool(self.supabase_url),
+            "supabase_key_configurada": bool(self.supabase_key),
+            "supabase_url_preview": self._mask_url(self.supabase_url),
+            "supabase_key_len": len(self.supabase_key) if self.supabase_key else 0,
+            "env_file_path": str(ENV_FILE_PATH),
+            "env_file_existe": ENV_FILE_PATH.exists(),
+        }
 
     @staticmethod
     def _seccion_resultados_base() -> Dict[str, Any]:
@@ -146,6 +171,7 @@ class SupabaseService:
             logger.warning("Supabase no esta configurado. No se actualizaran los drive_folder_id.")
             return {
                 "estado": "sin_configuracion_supabase",
+                "diagnostico_configuracion": self.config_diagnostico,
                 "especialistas_myma": self._seccion_resultados_base(),
                 "especialistas_externo": self._seccion_resultados_base(),
                 "conductores_myma": self._seccion_resultados_base(),
