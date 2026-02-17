@@ -93,6 +93,15 @@ async def crear_carpetas(
         try:
             logger.info("Actualizando Supabase con drive_folder_id")
             actualizaciones_supabase = supabase_service.actualizar_drive_folder_ids(json_final)
+            if isinstance(actualizaciones_supabase, dict):
+                resumen = actualizaciones_supabase.get("resumen", {})
+                intentados = resumen.get("intentados", 0)
+                exitosos = resumen.get("exitosos", 0)
+                if intentados > 0 and exitosos == 0:
+                    logger.warning(
+                        "Supabase no actualizo filas aunque hubo intentos. "
+                        f"Resumen: {resumen}"
+                    )
         except Exception as e:
             logger.warning(f"Error actualizando Supabase (continuando de todas formas): {e}")
             actualizaciones_supabase = {'error': str(e)}
@@ -118,4 +127,3 @@ async def crear_carpetas(
             status_code=500,
             detail=f"Error interno del servidor: {str(e)}"
         )
-

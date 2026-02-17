@@ -1,7 +1,9 @@
 """Servicio para interactuar con Supabase."""
 import logging
-from typing import Dict, Any, Optional
-from supabase import create_client, Client
+import time
+from typing import Any, Dict, Optional
+
+from supabase import Client, create_client
 
 from app.config import settings
 
@@ -10,120 +12,217 @@ logger = logging.getLogger(__name__)
 
 class SupabaseService:
     """Servicio para interactuar con Supabase."""
-    
+
     def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None):
         self.supabase_url = supabase_url or settings.supabase_url
         self.supabase_key = supabase_key or settings.supabase_key
         self.supabase: Optional[Client] = None
-        
+
         if self.supabase_url and self.supabase_key:
             self.supabase = create_client(self.supabase_url, self.supabase_key)
-    
+
+    @staticmethod
+    def _seccion_resultados_base() -> Dict[str, Any]:
+        """Estructura base para reportar resultados por seccion."""
+        return {
+            "intentados": 0,
+            "exitosos": 0,
+            "no_encontrado": 0,
+            "fallidos": 0,
+            "omitidos_sin_id": 0,
+            "omitidos_sin_id_folder": 0,
+            "errores": [],
+        }
+
+    @staticmethod
+    def _es_error_transitorio(error: Exception) -> bool:
+        """Determina si un error es transitorio para reintentar."""
+        error_texto = str(error).lower()
+        patrones_transitorios = [
+            "timeout",
+            "timed out",
+            "temporarily unavailable",
+            "connection reset",
+            "connection aborted",
+            "network is unreachable",
+            "service unavailable",
+        ]
+        return any(patron in error_texto for patron in patrones_transitorios)
+
+    def _actualizar_registro(
+        self,
+        seccion_resultado: Dict[str, Any],
+        tabla: str,
+        registro: Dict[str, Any],
+        etiqueta: str,
+        max_reintentos: int = 3,
+    ) -> None:
+        """Actualiza un registro con diagnostico detallado y reintentos."""
+        registro_id = registro.get("id")
+        id_folder = registro.get("id_folder")
+        nombre = registro.get("nombre", "N/A")
+
+        if registro_id is None:
+            seccion_resultado["omitidos_sin_id"] += 1
+            return
+
+        if not id_folder:
+            seccion_resultado["omitidos_sin_id_folder"] += 1
+            return
+
+        seccion_resultado["intentados"] += 1
+        ultimo_error: Optional[Exception] = None
+
+        for intento in range(1, max_reintentos + 1):
+            try:
+                response = (
+                    self.supabase.table(tabla)
+                    .update({"drive_folder_id": id_folder}, count="exact")
+                    .eq("id", registro_id)
+                    .execute()
+                )
+
+                afectados = response.count if response.count is not None else len(response.data or [])
+
+                if afectados > 0:
+                    seccion_resultado["exitosos"] += 1
+                    logger.info(
+                        f"Actualizado {etiqueta} {nombre} (ID: {registro_id}) en {tabla}. "
+                        f"Filas afectadas: {afectados}"
+                    )
+                else:
+                    seccion_resultado["no_encontrado"] += 1
+                    seccion_resultado["errores"].append(
+                        {
+                            "id": registro_id,
+                            "nombre": nombre,
+                            "tabla": tabla,
+                            "error": "No se encontro registro para actualizar",
+                        }
+                    )
+                    logger.warning(
+                        f"No se encontro registro para {etiqueta} {nombre} (ID: {registro_id}) "
+                        f"en tabla {tabla}."
+                    )
+                return
+            except Exception as error:
+                ultimo_error = error
+                if intento < max_reintentos and self._es_error_transitorio(error):
+                    espera = 0.5 * (2 ** (intento - 1))
+                    logger.warning(
+                        f"Error transitorio actualizando {etiqueta} {nombre} (ID: {registro_id}) "
+                        f"en {tabla}. Reintento {intento}/{max_reintentos} en {espera:.1f}s. "
+                        f"Error: {error}"
+                    )
+                    time.sleep(espera)
+                    continue
+                break
+
+        seccion_resultado["fallidos"] += 1
+        seccion_resultado["errores"].append(
+            {
+                "id": registro_id,
+                "nombre": nombre,
+                "tabla": tabla,
+                "error": str(ultimo_error),
+                "max_reintentos": max_reintentos,
+            }
+        )
+        logger.error(
+            f"Error actualizando {etiqueta} {nombre} (ID: {registro_id}) en tabla {tabla}: {ultimo_error}"
+        )
+
     def actualizar_drive_folder_ids(self, json_final: Dict[str, Any]) -> Dict[str, Any]:
         """
         Actualiza los campos drive_folder_id en Supabase usando los valores del JSON final.
-        
+
         Args:
-            json_final: Diccionario con la estructura del JSON final (con id_folder en cada registro)
-        
+            json_final: Diccionario con la estructura final (con id_folder en cada registro).
+
         Returns:
-            Diccionario con el resumen de actualizaciones (exitosas y fallidas)
+            Diccionario con diagnostico detallado de actualizaciones.
         """
         if not self.supabase:
-            logger.warning("Supabase no está configurado. No se actualizarán los drive_folder_id.")
+            logger.warning("Supabase no esta configurado. No se actualizaran los drive_folder_id.")
             return {
-                'especialistas_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-                'especialistas_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-                'conductores_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-                'conductores_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []}
+                "estado": "sin_configuracion_supabase",
+                "especialistas_myma": self._seccion_resultados_base(),
+                "especialistas_externo": self._seccion_resultados_base(),
+                "conductores_myma": self._seccion_resultados_base(),
+                "conductores_externo": self._seccion_resultados_base(),
+                "resumen": {
+                    "intentados": 0,
+                    "exitosos": 0,
+                    "no_encontrado": 0,
+                    "fallidos": 0,
+                    "omitidos_sin_id": 0,
+                    "omitidos_sin_id_folder": 0,
+                },
             }
-        
-        resultados = {
-            'especialistas_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-            'especialistas_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-            'conductores_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-            'conductores_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []}
-        }
-        
-        # Actualizar especialistas MYMA
-        if 'myma' in json_final and 'especialistas' in json_final['myma']:
-            for especialista in json_final['myma']['especialistas']:
-                if 'id' in especialista and 'id_folder' in especialista:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_trabajador_manual')\
-                            .update({'drive_folder_id': especialista['id_folder']})\
-                            .eq('id', especialista['id'])\
-                            .execute()
-                        resultados['especialistas_myma']['exitosos'] += 1
-                        logger.info(f"Actualizado especialista MYMA {especialista.get('nombre', 'N/A')} (ID: {especialista['id']})")
-                    except Exception as e:
-                        resultados['especialistas_myma']['fallidos'] += 1
-                        resultados['especialistas_myma']['errores'].append({
-                            'id': especialista['id'],
-                            'nombre': especialista.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando especialista MYMA {especialista.get('nombre', 'N/A')}: {e}")
-        
-        # Actualizar especialistas Externo
-        if 'externo' in json_final and 'especialistas' in json_final['externo']:
-            for especialista in json_final['externo']['especialistas']:
-                if 'id' in especialista and 'id_folder' in especialista:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_trabajador_manual')\
-                            .update({'drive_folder_id': especialista['id_folder']})\
-                            .eq('id', especialista['id'])\
-                            .execute()
-                        resultados['especialistas_externo']['exitosos'] += 1
-                        logger.info(f"Actualizado especialista Externo {especialista.get('nombre', 'N/A')} (ID: {especialista['id']})")
-                    except Exception as e:
-                        resultados['especialistas_externo']['fallidos'] += 1
-                        resultados['especialistas_externo']['errores'].append({
-                            'id': especialista['id'],
-                            'nombre': especialista.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando especialista Externo {especialista.get('nombre', 'N/A')}: {e}")
-        
-        # Actualizar conductores MYMA
-        if 'myma' in json_final and 'conductores' in json_final['myma']:
-            for conductor in json_final['myma']['conductores']:
-                if 'id' in conductor and 'id_folder' in conductor:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_conductor_manual')\
-                            .update({'drive_folder_id': conductor['id_folder']})\
-                            .eq('id', conductor['id'])\
-                            .execute()
-                        resultados['conductores_myma']['exitosos'] += 1
-                        logger.info(f"Actualizado conductor MYMA {conductor.get('nombre', 'N/A')} (ID: {conductor['id']})")
-                    except Exception as e:
-                        resultados['conductores_myma']['fallidos'] += 1
-                        resultados['conductores_myma']['errores'].append({
-                            'id': conductor['id'],
-                            'nombre': conductor.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando conductor MYMA {conductor.get('nombre', 'N/A')}: {e}")
-        
-        # Actualizar conductores Externo
-        if 'externo' in json_final and 'conductores' in json_final['externo']:
-            for conductor in json_final['externo']['conductores']:
-                if 'id' in conductor and 'id_folder' in conductor:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_conductor_manual')\
-                            .update({'drive_folder_id': conductor['id_folder']})\
-                            .eq('id', conductor['id'])\
-                            .execute()
-                        resultados['conductores_externo']['exitosos'] += 1
-                        logger.info(f"Actualizado conductor Externo {conductor.get('nombre', 'N/A')} (ID: {conductor['id']})")
-                    except Exception as e:
-                        resultados['conductores_externo']['fallidos'] += 1
-                        resultados['conductores_externo']['errores'].append({
-                            'id': conductor['id'],
-                            'nombre': conductor.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando conductor Externo {conductor.get('nombre', 'N/A')}: {e}")
-        
-        return resultados
 
+        resultados = {
+            "estado": "ok",
+            "especialistas_myma": self._seccion_resultados_base(),
+            "especialistas_externo": self._seccion_resultados_base(),
+            "conductores_myma": self._seccion_resultados_base(),
+            "conductores_externo": self._seccion_resultados_base(),
+        }
+
+        if "myma" in json_final and "especialistas" in json_final["myma"]:
+            for especialista in json_final["myma"]["especialistas"]:
+                self._actualizar_registro(
+                    seccion_resultado=resultados["especialistas_myma"],
+                    tabla="fct_acreditacion_solicitud_trabajador_manual",
+                    registro=especialista,
+                    etiqueta="especialista MYMA",
+                )
+
+        if "externo" in json_final and "especialistas" in json_final["externo"]:
+            for especialista in json_final["externo"]["especialistas"]:
+                self._actualizar_registro(
+                    seccion_resultado=resultados["especialistas_externo"],
+                    tabla="fct_acreditacion_solicitud_trabajador_manual",
+                    registro=especialista,
+                    etiqueta="especialista Externo",
+                )
+
+        if "myma" in json_final and "conductores" in json_final["myma"]:
+            for conductor in json_final["myma"]["conductores"]:
+                self._actualizar_registro(
+                    seccion_resultado=resultados["conductores_myma"],
+                    tabla="fct_acreditacion_solicitud_conductor_manual",
+                    registro=conductor,
+                    etiqueta="conductor MYMA",
+                )
+
+        if "externo" in json_final and "conductores" in json_final["externo"]:
+            for conductor in json_final["externo"]["conductores"]:
+                self._actualizar_registro(
+                    seccion_resultado=resultados["conductores_externo"],
+                    tabla="fct_acreditacion_solicitud_conductor_manual",
+                    registro=conductor,
+                    etiqueta="conductor Externo",
+                )
+
+        secciones = [
+            "especialistas_myma",
+            "especialistas_externo",
+            "conductores_myma",
+            "conductores_externo",
+        ]
+        resultados["resumen"] = {
+            "intentados": sum(resultados[s]["intentados"] for s in secciones),
+            "exitosos": sum(resultados[s]["exitosos"] for s in secciones),
+            "no_encontrado": sum(resultados[s]["no_encontrado"] for s in secciones),
+            "fallidos": sum(resultados[s]["fallidos"] for s in secciones),
+            "omitidos_sin_id": sum(resultados[s]["omitidos_sin_id"] for s in secciones),
+            "omitidos_sin_id_folder": sum(resultados[s]["omitidos_sin_id_folder"] for s in secciones),
+        }
+
+        if resultados["resumen"]["intentados"] > 0 and resultados["resumen"]["exitosos"] == 0:
+            logger.warning(
+                "Se intentaron actualizaciones en Supabase, pero no hubo filas afectadas. "
+                f"Resumen: {resultados['resumen']}"
+            )
+
+        return resultados
