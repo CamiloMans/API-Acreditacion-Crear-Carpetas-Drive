@@ -1,7 +1,13 @@
+from pathlib import Path
+
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ENV_FILE_PATH = PROJECT_ROOT / ".env"
+
+# Carga .env usando ruta absoluta para evitar problemas de CWD en VM/servicios.
+load_dotenv(dotenv_path=ENV_FILE_PATH)
 
 
 class Settings(BaseSettings):
@@ -20,7 +26,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     
     class Config:
-        env_file = ".env"
+        env_file = str(ENV_FILE_PATH)
         case_sensitive = False
         extra = "ignore"
 
