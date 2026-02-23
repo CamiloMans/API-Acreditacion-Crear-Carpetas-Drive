@@ -1,0 +1,18 @@
+services:
+  carpetas-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: carpetas-api:latest
+    env_file:
+      - .env
+    environment:
+      GOOGLE_TOKEN_FILE: /app/secrets/token.json
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    ports:
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - ./secrets/token.json:/app/secrets/token.json:rw
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true

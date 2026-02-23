@@ -189,6 +189,135 @@ Ejecutar tests:
 pytest tests/
 ```
 
+## Deployment con Docker (VM + Nginx)
+
+Esta API se puede ejecutar en una VM y publicar solo en loopback local para que Nginx haga de reverse proxy.
+
+### 1. Preparar variables y secretos
+
+1. Crear archivo `.env` a partir de ejemplo:
+
+```bash
+cp .env.example .env
+```
+
+2. Editar `.env` con valores reales:
+
+```env
+GOOGLE_TOKEN_FILE=/app/secrets/token.json
+SUPABASE_PROJECT_ID=your_supabase_project_id
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_KEY=your_supabase_service_role_key
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+WEB_CONCURRENCY=2
+```
+
+3. Crear carpeta de secretos y copiar `token.json`:
+
+```bash
+mkdir -p secrets
+cp /ruta/segura/token.json ./secrets/token.json
+```
+
+4. Dar permisos para que el usuario no-root del contenedor (UID/GID `10001`) pueda leer/escribir el token:
+
+```bash
+sudo chown 10001:10001 ./secrets/token.json
+sudo chmod 660 ./secrets/token.json
+```
+
+### 2. Build de imagen
+
+```bash
+docker compose build carpetas-api
+```
+
+### 3. Levantar servicio
+
+```bash
+docker compose up -d carpetas-api
+```
+
+El servicio queda publicado solo localmente en la VM:
+
+- `127.0.0.1:8001` (host VM) -> `8000` (contenedor)
+
+### 4. Verificar estado y healthcheck
+
+```bash
+docker compose ps
+docker compose logs -f carpetas-api
+```
+
+### 5. Probar endpoints con curl (desde la VM)
+
+```bash
+curl http://127.0.0.1:8001/
+curl http://127.0.0.1:8001/health
+```
+
+Prueba de endpoint principal:
+
+```bash
+curl -X POST "http://127.0.0.1:8001/carpetas/crear" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "codigo_proyecto": "MY-000-2026",
+    "myma": {
+      "especialistas": [],
+      "conductores": [],
+      "vehiculos": []
+    },
+    "externo": {
+      "empresa": "AGQ",
+      "especialistas": [],
+      "conductores": [],
+      "vehiculos": []
+    }
+  }'
+```
+
+### 6. Operacion diaria
+
+Ver logs:
+
+```bash
+docker compose logs -f carpetas-api
+```
+
+Reiniciar servicio:
+
+```bash
+docker compose restart carpetas-api
+```
+
+Detener servicio:
+
+```bash
+docker compose stop carpetas-api
+```
+
+Apagar stack y limpiar red de compose:
+
+```bash
+docker compose down
+```
+
+### 7. Verificaciones operativas recomendadas
+
+Verificar usuario no-root:
+
+```bash
+docker compose exec carpetas-api id
+```
+
+Verificar escritura de token montado (refresh OAuth):
+
+```bash
+docker compose exec carpetas-api sh -c "test -w /app/secrets/token.json && echo token_writable"
+```
+
 ## Deployment en Render
 
 ### 1. Preparar el repositorio
@@ -333,4 +462,3 @@ Los logs se configuran según `LOG_LEVEL` en `.env`. Los logs incluyen:
 ## Contacto
 
 [Información de contacto]
-
