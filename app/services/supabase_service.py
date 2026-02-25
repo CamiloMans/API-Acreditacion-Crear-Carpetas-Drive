@@ -85,7 +85,7 @@ class SupabaseService:
         """Actualiza un registro con diagnostico detallado y reintentos."""
         registro_id = registro.get("id")
         id_folder = registro.get("id_folder")
-        nombre = registro.get("nombre", "N/A")
+        nombre = registro.get("nombre") or registro.get("patente") or "N/A"
 
         if registro_id is None:
             seccion_resultado["omitidos_sin_id"] += 1
@@ -176,6 +176,8 @@ class SupabaseService:
                 "especialistas_externo": self._seccion_resultados_base(),
                 "conductores_myma": self._seccion_resultados_base(),
                 "conductores_externo": self._seccion_resultados_base(),
+                "vehiculos_myma": self._seccion_resultados_base(),
+                "vehiculos_externo": self._seccion_resultados_base(),
                 "resumen": {
                     "intentados": 0,
                     "exitosos": 0,
@@ -192,6 +194,8 @@ class SupabaseService:
             "especialistas_externo": self._seccion_resultados_base(),
             "conductores_myma": self._seccion_resultados_base(),
             "conductores_externo": self._seccion_resultados_base(),
+            "vehiculos_myma": self._seccion_resultados_base(),
+            "vehiculos_externo": self._seccion_resultados_base(),
         }
 
         if "myma" in json_final and "especialistas" in json_final["myma"]:
@@ -230,11 +234,31 @@ class SupabaseService:
                     etiqueta="conductor Externo",
                 )
 
+        if "myma" in json_final and "vehiculos" in json_final["myma"]:
+            for vehiculo in json_final["myma"]["vehiculos"]:
+                self._actualizar_registro(
+                    seccion_resultado=resultados["vehiculos_myma"],
+                    tabla="fct_acreditacion_solicitud_vehiculos",
+                    registro=vehiculo,
+                    etiqueta="vehiculo MYMA",
+                )
+
+        if "externo" in json_final and "vehiculos" in json_final["externo"]:
+            for vehiculo in json_final["externo"]["vehiculos"]:
+                self._actualizar_registro(
+                    seccion_resultado=resultados["vehiculos_externo"],
+                    tabla="fct_acreditacion_solicitud_vehiculos",
+                    registro=vehiculo,
+                    etiqueta="vehiculo Externo",
+                )
+
         secciones = [
             "especialistas_myma",
             "especialistas_externo",
             "conductores_myma",
             "conductores_externo",
+            "vehiculos_myma",
+            "vehiculos_externo",
         ]
         resultados["resumen"] = {
             "intentados": sum(resultados[s]["intentados"] for s in secciones),

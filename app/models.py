@@ -17,7 +17,7 @@ class Conductor(BaseModel):
 
 class Vehiculo(BaseModel):
     id: Optional[int] = None
-    nombre: str
+    patente: str
     id_folder: Optional[str] = None
 
 

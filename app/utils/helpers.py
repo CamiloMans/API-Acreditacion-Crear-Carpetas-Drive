@@ -3,17 +3,20 @@
 
 def obtener_nombre_elemento(elemento):
     """
-    Extrae el nombre de un elemento, ya sea string o objeto con 'nombre'.
-    Compatible con ambos formatos para mantener retrocompatibilidad.
+    Extrae el identificador legible de un elemento.
+    Soporta objetos con 'nombre' (personas) o 'patente' (vehiculos).
+    Compatible con string para mantener retrocompatibilidad.
     
     Args:
-        elemento: Puede ser un string o un diccionario con 'nombre' (y opcionalmente 'id')
+        elemento: Puede ser un string o un diccionario con 'nombre'/'patente'
     
     Returns:
-        El nombre como string
+        El valor legible como string
     """
     if isinstance(elemento, dict) and 'nombre' in elemento:
         return elemento['nombre']
+    elif isinstance(elemento, dict) and 'patente' in elemento:
+        return elemento['patente']
     elif isinstance(elemento, str):
         return elemento
     else:

@@ -442,13 +442,13 @@ class DriveService:
                         nombre_vehiculo, carpeta_vehiculos_id, drive_id
                     )
                     if carpeta_existente:
-                        item = {'nombre': nombre_vehiculo, 'carpeta_id': carpeta_existente}
+                        item = {'patente': nombre_vehiculo, 'carpeta_id': carpeta_existente}
                         if id_vehiculo is not None:
                             item['id'] = id_vehiculo
                         subcarpetas_creadas['vehiculos'].append(item)
                     else:
                         carpeta_id = self.create_folder(nombre_vehiculo, carpeta_vehiculos_id, drive_id)
-                        item = {'nombre': nombre_vehiculo, 'carpeta_id': carpeta_id}
+                        item = {'patente': nombre_vehiculo, 'carpeta_id': carpeta_id}
                         if id_vehiculo is not None:
                             item['id'] = id_vehiculo
                         subcarpetas_creadas['vehiculos'].append(item)
@@ -533,13 +533,13 @@ class DriveService:
                         nombre_vehiculo, carpeta_vehiculos_id, drive_id
                     )
                     if carpeta_existente:
-                        item = {'nombre': nombre_vehiculo, 'carpeta_id': carpeta_existente}
+                        item = {'patente': nombre_vehiculo, 'carpeta_id': carpeta_existente}
                         if id_vehiculo is not None:
                             item['id'] = id_vehiculo
                         subcarpetas_creadas['vehiculos'].append(item)
                     else:
                         carpeta_id = self.create_folder(nombre_vehiculo, carpeta_vehiculos_id, drive_id)
-                        item = {'nombre': nombre_vehiculo, 'carpeta_id': carpeta_id}
+                        item = {'patente': nombre_vehiculo, 'carpeta_id': carpeta_id}
                         if id_vehiculo is not None:
                             item['id'] = id_vehiculo
                         subcarpetas_creadas['vehiculos'].append(item)
@@ -575,7 +575,10 @@ class DriveService:
             
             # Mapear vehículos
             if 'vehiculos' in subcarpetas_externos and 'externo' in json_final and 'vehiculos' in json_final['externo']:
-                mapa_vehiculos = {item['nombre']: item['carpeta_id'] for item in subcarpetas_externos['vehiculos']}
+                mapa_vehiculos = {
+                    obtener_nombre_elemento(item): item['carpeta_id']
+                    for item in subcarpetas_externos['vehiculos']
+                }
                 for vehiculo in json_final['externo']['vehiculos']:
                     nombre = obtener_nombre_elemento(vehiculo)
                     if nombre in mapa_vehiculos:
@@ -603,7 +606,10 @@ class DriveService:
             
             # Mapear vehículos
             if 'vehiculos' in subcarpetas_myma and 'myma' in json_final and 'vehiculos' in json_final['myma']:
-                mapa_vehiculos = {item['nombre']: item['carpeta_id'] for item in subcarpetas_myma['vehiculos']}
+                mapa_vehiculos = {
+                    obtener_nombre_elemento(item): item['carpeta_id']
+                    for item in subcarpetas_myma['vehiculos']
+                }
                 for vehiculo in json_final['myma']['vehiculos']:
                     nombre = obtener_nombre_elemento(vehiculo)
                     if nombre in mapa_vehiculos:
