@@ -1,9 +1,10 @@
-"""Router para endpoints de carpetas."""
+﻿"""Router para endpoints de carpetas."""
 import logging
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any
+from typing import Any, Dict
 
-from app.models import ProyectoRequest, ProyectoResponse, ErrorResponse
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.models import ProyectoRequest, ProyectoResponse
 from app.services.drive_service import DriveService
 from app.services.supabase_service import SupabaseService
 
@@ -26,70 +27,79 @@ def get_supabase_service() -> SupabaseService:
 async def crear_carpetas(
     proyecto: ProyectoRequest,
     drive_service: DriveService = Depends(get_drive_service),
-    supabase_service: SupabaseService = Depends(get_supabase_service)
+    supabase_service: SupabaseService = Depends(get_supabase_service),
 ):
     """
     Endpoint principal que:
-    1. Procesa el código del proyecto
+    1. Procesa el codigo del proyecto
     2. Navega por la ruta del proyecto
     3. Crea carpetas para datos externos y MYMA
     4. Genera el JSON final con id_folder
     5. Actualiza Supabase
     """
     try:
-        # 1. Procesar código del proyecto
-        logger.info(f"Procesando código de proyecto: {proyecto.codigo_proyecto}")
+        # 1. Procesar codigo del proyecto
+        logger.info(f"Procesando codigo de proyecto: {proyecto.codigo_proyecto}")
         resultado = drive_service.procesar_codigo_proyecto(proyecto.dict())
         if not resultado:
             raise HTTPException(
                 status_code=400,
-                detail="Error procesando código del proyecto. Verifique que el código tenga el formato correcto (MY-XXX-YYYY) y que el Shared Drive exista."
+                detail=(
+                    "Error procesando codigo del proyecto. Verifique formato MY-XXX-YYYY, "
+                    "existencia del Shared Drive 'Acreditaciones' y carpeta base "
+                    "'Acreditaciones' dentro del drive."
+                ),
             )
-        
+
         # 2. Navegar ruta del proyecto
         logger.info(f"Navegando ruta del proyecto: {proyecto.codigo_proyecto}")
         resultado_navegacion = drive_service.navegar_ruta_proyecto(
             proyecto.codigo_proyecto,
-            resultado['drive_id']
+            resultado["drive_id"],
         )
-        if not resultado_navegacion or not resultado_navegacion.get('id_carpeta_final'):
+        if not resultado_navegacion or not resultado_navegacion.get("id_carpeta_final"):
             raise HTTPException(
                 status_code=400,
-                detail="Error navegando ruta del proyecto. Verifique que la estructura de carpetas exista."
+                detail=(
+                    "Error navegando ruta del proyecto. Verifique la estructura "
+                    "Acreditaciones/Acreditaciones/Proyectos YYYY/<codigo_proyecto>."
+                ),
             )
-        
-        id_carpeta_acreditacion = resultado_navegacion['id_carpeta_final']
-        
+
+        id_carpeta_acreditacion = resultado_navegacion["id_carpeta_final"]
+
         # 3. Gestionar carpetas externos
-        resultado_carpetas_externos = None
+        resultado_carpetas_externos: Dict[str, Any] | None = None
         if proyecto.externo and proyecto.externo.empresa:
-            logger.info(f"Gestionando carpetas externos para empresa: {proyecto.externo.empresa}")
+            logger.info(
+                f"Gestionando carpetas externos para empresa: {proyecto.externo.empresa}"
+            )
             resultado_carpetas_externos = drive_service.gestionar_carpetas_externos(
                 id_carpeta_acreditacion,
                 proyecto.externo.dict(),
-                resultado['drive_id']
+                resultado["drive_id"],
             )
-        
+
         # 4. Gestionar carpetas MYMA
-        resultado_carpetas_myma = None
+        resultado_carpetas_myma: Dict[str, Any] | None = None
         if proyecto.myma:
             logger.info("Gestionando carpetas MYMA")
             resultado_carpetas_myma = drive_service.gestionar_carpetas_myma(
                 id_carpeta_acreditacion,
                 proyecto.myma.dict(),
-                resultado['drive_id']
+                resultado["drive_id"],
             )
-        
+
         # 5. Generar JSON final
         logger.info("Generando JSON final con id_folder")
         json_final = drive_service.generar_json_final(
             proyecto.dict(),
             resultado_carpetas_externos,
-            resultado_carpetas_myma
+            resultado_carpetas_myma,
         )
-        
+
         # 6. Actualizar Supabase
-        actualizaciones_supabase = None
+        actualizaciones_supabase: Dict[str, Any] | None = None
         try:
             logger.info("Actualizando Supabase con drive_folder_id")
             actualizaciones_supabase = supabase_service.actualizar_drive_folder_ids(json_final)
@@ -104,26 +114,26 @@ async def crear_carpetas(
                     )
         except Exception as e:
             logger.warning(f"Error actualizando Supabase (continuando de todas formas): {e}")
-            actualizaciones_supabase = {'error': str(e)}
-        
+            actualizaciones_supabase = {"error": str(e)}
+
         return ProyectoResponse(
-            codigo_proyecto=proyecto.codigo_proyecto,
-            año_proyecto=resultado['año_proyecto'],
-            nombre_drive=resultado['nombre_drive'],
-            drive_id=resultado['drive_id'],
-            id_carpeta_final=id_carpeta_acreditacion,
-            json_final=json_final,
-            carpetas_externos=resultado_carpetas_externos,
-            carpetas_myma=resultado_carpetas_myma,
-            actualizaciones_supabase=actualizaciones_supabase,
-            mensaje="Proceso completado exitosamente"
+            **{
+                "codigo_proyecto": proyecto.codigo_proyecto,
+                "a\u00f1o_proyecto": resultado["a\u00f1o_proyecto"],
+                "nombre_drive": resultado["nombre_drive"],
+                "drive_id": resultado["drive_id"],
+                "id_carpeta_final": id_carpeta_acreditacion,
+                "json_final": json_final,
+                "carpetas_externos": resultado_carpetas_externos,
+                "carpetas_myma": resultado_carpetas_myma,
+                "actualizaciones_supabase": actualizaciones_supabase,
+                "mensaje": "Proceso completado exitosamente",
+            }
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error en crear_carpetas: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error interno del servidor: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+
