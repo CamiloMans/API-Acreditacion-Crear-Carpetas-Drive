@@ -28,7 +28,7 @@ class DatosMyma(BaseModel):
 
 
 class DatosExterno(BaseModel):
-    empresa: str
+    empresa: Optional[str] = None
     especialistas: List[Especialista] = []
     conductores: List[Conductor] = []
     vehiculos: List[Vehiculo] = []

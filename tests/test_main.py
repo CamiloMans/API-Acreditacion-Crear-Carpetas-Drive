@@ -84,3 +84,33 @@ def test_crear_carpetas_drive_auth_error(monkeypatch):
 
     assert response.status_code == 500
     assert "Token invalido para Google Drive" in response.json()["detail"]
+
+
+def test_crear_carpetas_acepta_empresa_externa_null(monkeypatch):
+    """empresa null en externo no debe fallar validacion Pydantic."""
+
+    def raise_auth_error(_self):
+        raise RuntimeError("Token invalido para Google Drive")
+
+    monkeypatch.setattr(DriveService, "get_service", raise_auth_error)
+
+    response = client.post(
+        "/carpetas/crear",
+        json={
+            "codigo_proyecto": "MY-000-2026",
+            "myma": {
+                "especialistas": [],
+                "conductores": [],
+                "vehiculos": [],
+            },
+            "externo": {
+                "empresa": None,
+                "especialistas": [],
+                "conductores": [],
+                "vehiculos": [],
+            },
+        },
+    )
+
+    assert response.status_code == 500
+    assert "Token invalido para Google Drive" in response.json()["detail"]
