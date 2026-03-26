@@ -1,5 +1,5 @@
 """Modelos Pydantic para request y response."""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
 
 
@@ -35,9 +35,17 @@ class DatosExterno(BaseModel):
 
 
 class ProyectoRequest(BaseModel):
-    codigo_proyecto: str = Field(..., pattern=r'^MY-\d{3}-\d{4}$', description="Código del proyecto en formato MY-XXX-YYYY")
+    codigo_proyecto: str = Field(..., description="Codigo del proyecto")
     myma: DatosMyma
     externo: DatosExterno
+
+    @validator("codigo_proyecto")
+    def validar_codigo_proyecto(cls, value: str) -> str:
+        """Valida que codigo_proyecto sea un string no vacio tras trim."""
+        cleaned_value = (value or "").strip()
+        if not cleaned_value:
+            raise ValueError("codigo_proyecto no puede estar vacio")
+        return cleaned_value
 
 
 class ProyectoResponse(BaseModel):
@@ -56,4 +64,5 @@ class ProyectoResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detalle: Optional[str] = None
+
 

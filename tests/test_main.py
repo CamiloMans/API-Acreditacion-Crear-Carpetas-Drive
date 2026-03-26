@@ -3,6 +3,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers.carpetas import get_drive_service, get_supabase_service
 from app.services.drive_service import DriveService
 
 client = TestClient(app)
@@ -23,26 +24,63 @@ def test_health():
     assert response.json()["status"] == "healthy"
 
 
-def test_crear_carpetas_invalid_code():
-    """Test del endpoint crear carpetas con codigo invalido."""
-    response = client.post(
-        "/carpetas/crear",
-        json={
-            "codigo_proyecto": "INVALID-CODE",
-            "myma": {
-                "especialistas": [],
-                "conductores": [],
-                "vehiculos": [],
+def test_crear_carpetas_invalid_code_usa_fallback_contrato_marco():
+    """Codigo invalido para MY debe seguir flujo exitoso por Contrato Marco."""
+
+    class FakeDriveService:
+        def procesar_codigo_proyecto(self, _proyecto):
+            return {
+                "codigo_proyecto": "INVALID-CODE",
+                "codigo_proyecto_saneado": "INVALID-CODE",
+                "ruta_tipo": "contrato_marco",
+                "a\u00f1o_proyecto": "",
+                "nombre_drive": "Acreditaciones",
+                "drive_id": "drive-1",
+            }
+
+        def navegar_ruta_proyecto(self, _codigo_proyecto, _drive_id):
+            return {"id_carpeta_final": "folder-1"}
+
+        def gestionar_carpetas_externos(self, _id_carpeta, _externo, _drive_id):
+            return {"subcarpetas_creadas": {}}
+
+        def gestionar_carpetas_myma(self, _id_carpeta, _myma, _drive_id):
+            return {"subcarpetas_creadas": {}}
+
+        def generar_json_final(self, proyecto, _externos, _myma):
+            return proyecto
+
+    class FakeSupabaseService:
+        def actualizar_drive_folder_ids(self, _json_final):
+            return {"resumen": {"intentados": 0, "exitosos": 0}}
+
+    app.dependency_overrides[get_drive_service] = lambda: FakeDriveService()
+    app.dependency_overrides[get_supabase_service] = lambda: FakeSupabaseService()
+
+    try:
+        response = client.post(
+            "/carpetas/crear",
+            json={
+                "codigo_proyecto": "INVALID-CODE",
+                "myma": {
+                    "especialistas": [],
+                    "conductores": [],
+                    "vehiculos": [],
+                },
+                "externo": {
+                    "empresa": "Test",
+                    "especialistas": [],
+                    "conductores": [],
+                    "vehiculos": [],
+                },
             },
-            "externo": {
-                "empresa": "Test",
-                "especialistas": [],
-                "conductores": [],
-                "vehiculos": [],
-            },
-        },
-    )
-    assert response.status_code == 422  # Validation error
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["a\u00f1o_proyecto"] == ""
+    assert response.json()["id_carpeta_final"] == "folder-1"
 
 
 def test_crear_carpetas_missing_fields():

@@ -45,9 +45,8 @@ async def crear_carpetas(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Error procesando codigo del proyecto. Verifique formato MY-XXX-YYYY, "
-                    "existencia del Shared Drive 'Acreditaciones' y carpeta base "
-                    "'Acreditaciones' dentro del drive."
+                    "Error procesando codigo del proyecto. Verifique existencia del Shared Drive "
+                    "'Acreditaciones' y carpeta base 'Acreditaciones' dentro del drive."
                 ),
             )
 
@@ -62,7 +61,8 @@ async def crear_carpetas(
                 status_code=400,
                 detail=(
                     "Error navegando ruta del proyecto. Verifique la estructura "
-                    "Acreditaciones/Acreditaciones/Proyectos YYYY/<codigo_proyecto>."
+                    "Acreditaciones/Acreditaciones/Proyectos YYYY/<codigo_proyecto> "
+                    "o Acreditaciones/Acreditaciones/Contrato Marco/<codigo_saneado>."
                 ),
             )
 

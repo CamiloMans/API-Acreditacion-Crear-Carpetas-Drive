@@ -19,6 +19,8 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 ACREDITACIONES_DRIVE_NAME = "Acreditaciones"
 ACREDITACIONES_ROOT_FOLDER_NAME = "Acreditaciones"
+CONTRATO_MARCO_FOLDER_NAME = "Contrato Marco"
+FALLBACK_PROJECT_FOLDER_NAME = "sin-codigo"
 EXTERNOS_FOLDER_NAME = "Externos"
 MYMA_FOLDER_NAME = "MYMA"
 BASE_FOLDER_LABELS = {
@@ -28,6 +30,7 @@ BASE_FOLDER_LABELS = {
     "vehiculos": "04 Vehiculos",
 }
 NUMERIC_PREFIX_PATTERN = re.compile(r"^\s*\d+\s*[-_.]?\s*")
+PROJECT_CODE_PATTERN = re.compile(r"^MY-\d{3}-(\d{4})$")
 
 
 class DriveService:
@@ -56,6 +59,25 @@ class DriveService:
             return self._normalize_base_folder_label(actual_name) == self._normalize_base_folder_label(expected_name)
         return self._normalize_name(actual_name) == self._normalize_name(expected_name)
 
+    @staticmethod
+    def _extract_project_year(codigo_proyecto: str) -> Optional[str]:
+        """Retorna el anio si el codigo cumple patron MY-XXX-YYYY."""
+        match = PROJECT_CODE_PATTERN.match(codigo_proyecto)
+        if not match:
+            return None
+        return match.group(1)
+
+    @staticmethod
+    def _sanitize_project_folder_name(codigo_proyecto: str) -> str:
+        """Sanea nombre de carpeta permitiendo letras, numeros, -_() y espacios."""
+        cleaned_chars = []
+        for char in codigo_proyecto:
+            if char.isalnum() or char in {" ", "-", "_", "(", ")"}:
+                cleaned_chars.append(char)
+
+        cleaned_name = " ".join("".join(cleaned_chars).split())
+        return cleaned_name or FALLBACK_PROJECT_FOLDER_NAME
+
     def _find_or_create_folder(
         self,
         folder_name: str,
@@ -82,12 +104,10 @@ class DriveService:
         crear_carpeta_proyecto: bool,
     ) -> Optional[Dict[str, Any]]:
         """Resuelve/c crea la ruta Acreditaciones/Acreditaciones/Proyectos YYYY/codigo."""
-        match = re.match(r"^MY-\d{3}-(\d{4})$", codigo_proyecto)
-        if not match:
+        anio_proyecto = self._extract_project_year(codigo_proyecto)
+        if not anio_proyecto:
             logger.error(f"El codigo '{codigo_proyecto}' no tiene el formato correcto.")
             return None
-
-        anio_proyecto = match.group(1)
         nombre_proyectos_anio = f"Proyectos {anio_proyecto}"
 
         carpeta_acreditaciones_id = self.find_folder_by_name_in_directory(
@@ -136,6 +156,42 @@ class DriveService:
             "nombre_proyectos_anio": nombre_proyectos_anio,
             "carpeta_acreditaciones_id": carpeta_acreditaciones_id,
             "carpeta_proyectos_anio_id": carpeta_proyectos_anio_id,
+            "carpeta_proyecto_id": carpeta_proyecto_id,
+        }
+
+    def _resolver_estructura_contrato_marco(
+        self,
+        codigo_proyecto: str,
+        drive_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Resuelve/c crea la ruta Acreditaciones/Acreditaciones/Contrato Marco/<codigo saneado>."""
+        carpeta_acreditaciones_id = self.find_folder_by_name_in_directory(
+            ACREDITACIONES_ROOT_FOLDER_NAME,
+            drive_id,
+            drive_id,
+        )
+        if not carpeta_acreditaciones_id:
+            logger.error(
+                "No se encontro la carpeta base 'Acreditaciones' dentro del Shared Drive 'Acreditaciones'."
+            )
+            return None
+
+        carpeta_contrato_marco_id = self._find_or_create_folder(
+            CONTRATO_MARCO_FOLDER_NAME,
+            carpeta_acreditaciones_id,
+            drive_id,
+        )
+        codigo_proyecto_saneado = self._sanitize_project_folder_name(codigo_proyecto)
+        carpeta_proyecto_id = self._find_or_create_folder(
+            codigo_proyecto_saneado,
+            carpeta_contrato_marco_id,
+            drive_id,
+        )
+
+        return {
+            "codigo_proyecto_saneado": codigo_proyecto_saneado,
+            "carpeta_acreditaciones_id": carpeta_acreditaciones_id,
+            "carpeta_contrato_marco_id": carpeta_contrato_marco_id,
             "carpeta_proyecto_id": carpeta_proyecto_id,
         }
 
@@ -385,41 +441,66 @@ class DriveService:
             logger.error("datos_proyecto debe ser un diccionario o un string")
             return None
 
-        patron = r"^MY-\d{3}-(\d{4})$"
-        match = re.match(patron, codigo_proyecto)
-
-        if not match:
-            logger.error(f"El codigo '{codigo_proyecto}' no tiene el formato correcto.")
-            return None
-
-        anio_proyecto = match.group(1)
-        nombre_proyectos_anio = f"Proyectos {anio_proyecto}"
+        anio_proyecto = self._extract_project_year(codigo_proyecto)
 
         drive_id = self.find_shared_drive_by_name(ACREDITACIONES_DRIVE_NAME)
         if not drive_id:
             logger.error(f"No se encontro el Shared Drive '{ACREDITACIONES_DRIVE_NAME}'")
             return None
 
-        estructura = self._resolver_estructura_proyecto(
-            codigo_proyecto=codigo_proyecto,
-            drive_id=drive_id,
-            crear_proyectos_anio=True,
-            crear_carpeta_proyecto=True,
-        )
+        if anio_proyecto:
+            ruta_tipo = "proyecto_anual"
+            nombre_proyectos_anio = f"Proyectos {anio_proyecto}"
+            codigo_proyecto_saneado = codigo_proyecto
+            estructura = self._resolver_estructura_proyecto(
+                codigo_proyecto=codigo_proyecto,
+                drive_id=drive_id,
+                crear_proyectos_anio=True,
+                crear_carpeta_proyecto=True,
+            )
+        else:
+            ruta_tipo = "contrato_marco"
+            nombre_proyectos_anio = None
+            anio_proyecto = ""
+            estructura = self._resolver_estructura_contrato_marco(codigo_proyecto, drive_id)
+            codigo_proyecto_saneado = (
+                estructura.get("codigo_proyecto_saneado")
+                if estructura
+                else self._sanitize_project_folder_name(codigo_proyecto)
+            )
+            logger.info(
+                "Codigo de proyecto fuera de patron MY. Usando ruta Contrato Marco con nombre saneado '%s'.",
+                codigo_proyecto_saneado,
+            )
+
         if not estructura:
             return None
 
         resultado = {
             "codigo_proyecto": codigo_proyecto,
+            "codigo_proyecto_saneado": codigo_proyecto_saneado,
+            "ruta_tipo": ruta_tipo,
             "a\u00f1o_proyecto": anio_proyecto,
             "nombre_drive": ACREDITACIONES_DRIVE_NAME,
             "drive_id": drive_id,
             "carpeta_acreditaciones_id": estructura["carpeta_acreditaciones_id"],
-            "carpeta_proyectos_anio_id": estructura["carpeta_proyectos_anio_id"],
             "id_carpeta_proyecto": estructura["carpeta_proyecto_id"],
-            "nombre_carpeta_proyectos_anio": nombre_proyectos_anio,
-            "carpetas": self.list_folders_in_directory(estructura["carpeta_proyectos_anio_id"], drive_id),
         }
+
+        if ruta_tipo == "proyecto_anual":
+            resultado["carpeta_proyectos_anio_id"] = estructura["carpeta_proyectos_anio_id"]
+            resultado["nombre_carpeta_proyectos_anio"] = nombre_proyectos_anio
+            resultado["carpetas"] = self.list_folders_in_directory(
+                estructura["carpeta_proyectos_anio_id"],
+                drive_id,
+            )
+        else:
+            resultado["carpeta_contrato_marco_id"] = estructura["carpeta_contrato_marco_id"]
+            resultado["nombre_carpeta_contrato_marco"] = CONTRATO_MARCO_FOLDER_NAME
+            resultado["carpetas"] = self.list_folders_in_directory(
+                estructura["carpeta_contrato_marco_id"],
+                drive_id,
+            )
 
         if datos_completos:
             resultado["datos_completos"] = datos_completos
@@ -432,38 +513,68 @@ class DriveService:
         drive_id: str,
         ruta_fija: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Navega la nueva ruta central y retorna la carpeta final del proyecto."""
+        """Navega la ruta correspondiente y retorna la carpeta final del proyecto."""
         _ = ruta_fija  # Parametro mantenido por compatibilidad.
 
-        estructura = self._resolver_estructura_proyecto(
-            codigo_proyecto=codigo_proyecto,
-            drive_id=drive_id,
-            crear_proyectos_anio=True,
-            crear_carpeta_proyecto=True,
-        )
-        if not estructura:
-            return None
+        anio_proyecto = self._extract_project_year(codigo_proyecto)
+        if anio_proyecto:
+            estructura = self._resolver_estructura_proyecto(
+                codigo_proyecto=codigo_proyecto,
+                drive_id=drive_id,
+                crear_proyectos_anio=True,
+                crear_carpeta_proyecto=True,
+            )
+            if not estructura:
+                return None
 
-        niveles = [
-            {
-                "nombre": ACREDITACIONES_ROOT_FOLDER_NAME,
-                "id": estructura["carpeta_acreditaciones_id"],
-                "parent_id": drive_id,
-                "nivel": 1,
-            },
-            {
-                "nombre": estructura["nombre_proyectos_anio"],
-                "id": estructura["carpeta_proyectos_anio_id"],
-                "parent_id": estructura["carpeta_acreditaciones_id"],
-                "nivel": 2,
-            },
-            {
-                "nombre": codigo_proyecto,
-                "id": estructura["carpeta_proyecto_id"],
-                "parent_id": estructura["carpeta_proyectos_anio_id"],
-                "nivel": 3,
-            },
-        ]
+            niveles = [
+                {
+                    "nombre": ACREDITACIONES_ROOT_FOLDER_NAME,
+                    "id": estructura["carpeta_acreditaciones_id"],
+                    "parent_id": drive_id,
+                    "nivel": 1,
+                },
+                {
+                    "nombre": estructura["nombre_proyectos_anio"],
+                    "id": estructura["carpeta_proyectos_anio_id"],
+                    "parent_id": estructura["carpeta_acreditaciones_id"],
+                    "nivel": 2,
+                },
+                {
+                    "nombre": codigo_proyecto,
+                    "id": estructura["carpeta_proyecto_id"],
+                    "parent_id": estructura["carpeta_proyectos_anio_id"],
+                    "nivel": 3,
+                },
+            ]
+        else:
+            estructura = self._resolver_estructura_contrato_marco(
+                codigo_proyecto=codigo_proyecto,
+                drive_id=drive_id,
+            )
+            if not estructura:
+                return None
+
+            niveles = [
+                {
+                    "nombre": ACREDITACIONES_ROOT_FOLDER_NAME,
+                    "id": estructura["carpeta_acreditaciones_id"],
+                    "parent_id": drive_id,
+                    "nivel": 1,
+                },
+                {
+                    "nombre": CONTRATO_MARCO_FOLDER_NAME,
+                    "id": estructura["carpeta_contrato_marco_id"],
+                    "parent_id": estructura["carpeta_acreditaciones_id"],
+                    "nivel": 2,
+                },
+                {
+                    "nombre": estructura["codigo_proyecto_saneado"],
+                    "id": estructura["carpeta_proyecto_id"],
+                    "parent_id": estructura["carpeta_contrato_marco_id"],
+                    "nivel": 3,
+                },
+            ]
 
         return {
             "codigo_proyecto": codigo_proyecto,

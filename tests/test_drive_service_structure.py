@@ -82,6 +82,50 @@ def test_procesar_codigo_proyecto_crea_proyectos_y_codigo_si_faltan():
     assert result["id_carpeta_proyecto"] == carpeta_codigo_id
 
 
+def test_procesar_codigo_proyecto_invalido_usa_contrato_marco_con_nombre_saneado():
+    service = InMemoryDriveService()
+    service.add_shared_drive("Acreditaciones", "drive-1")
+    carpeta_acreditaciones_id = service.add_folder("drive-1", "Acreditaciones")
+
+    result = service.procesar_codigo_proyecto({"codigo_proyecto": "CM/2026:*? Proyecto (1)_A"})
+
+    assert result is not None
+    assert result["ruta_tipo"] == "contrato_marco"
+    assert result["a\u00f1o_proyecto"] == ""
+    assert result["codigo_proyecto_saneado"] == "CM2026 Proyecto (1)_A"
+
+    carpeta_contrato_marco_id = service.find_folder_by_name_in_directory(
+        "Contrato Marco", carpeta_acreditaciones_id, "drive-1"
+    )
+    assert carpeta_contrato_marco_id is not None
+
+    carpeta_codigo_id = service.find_folder_by_name_in_directory(
+        "CM2026 Proyecto (1)_A", carpeta_contrato_marco_id, "drive-1"
+    )
+    assert carpeta_codigo_id == result["id_carpeta_proyecto"]
+
+
+def test_procesar_codigo_proyecto_invalido_usa_nombre_por_defecto_si_queda_vacio():
+    service = InMemoryDriveService()
+    service.add_shared_drive("Acreditaciones", "drive-1")
+    carpeta_acreditaciones_id = service.add_folder("drive-1", "Acreditaciones")
+
+    result = service.procesar_codigo_proyecto({"codigo_proyecto": "@@@###///"})
+
+    assert result is not None
+    assert result["codigo_proyecto_saneado"] == "sin-codigo"
+    assert result["ruta_tipo"] == "contrato_marco"
+
+    carpeta_contrato_marco_id = service.find_folder_by_name_in_directory(
+        "Contrato Marco", carpeta_acreditaciones_id, "drive-1"
+    )
+    assert carpeta_contrato_marco_id is not None
+    assert (
+        service.find_folder_by_name_in_directory("sin-codigo", carpeta_contrato_marco_id, "drive-1")
+        == result["id_carpeta_proyecto"]
+    )
+
+
 def test_navegar_ruta_proyecto_devuelve_carpeta_final_nueva_ruta():
     service = InMemoryDriveService()
     service.add_shared_drive("Acreditaciones", "drive-1")
@@ -97,6 +141,24 @@ def test_navegar_ruta_proyecto_devuelve_carpeta_final_nueva_ruta():
         "Acreditaciones",
         "Proyectos 2026",
         "MY-001-2026",
+    ]
+
+
+def test_navegar_ruta_proyecto_invalido_devuelve_ruta_contrato_marco():
+    service = InMemoryDriveService()
+    service.add_shared_drive("Acreditaciones", "drive-1")
+    carpeta_acreditaciones_id = service.add_folder("drive-1", "Acreditaciones")
+    carpeta_contrato_marco_id = service.add_folder(carpeta_acreditaciones_id, "Contrato Marco")
+    carpeta_codigo_id = service.add_folder(carpeta_contrato_marco_id, "ABC 2026")
+
+    result = service.navegar_ruta_proyecto("ABC 2026", "drive-1")
+
+    assert result is not None
+    assert result["id_carpeta_final"] == carpeta_codigo_id
+    assert [nivel["nombre"] for nivel in result["niveles"]] == [
+        "Acreditaciones",
+        "Contrato Marco",
+        "ABC 2026",
     ]
 
 
