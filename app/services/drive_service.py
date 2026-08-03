@@ -262,12 +262,12 @@ class DriveService:
                     with open(self.token_file, "w", encoding="utf-8") as token:
                         token.write(creds.to_json())
                 except Exception as exc:
-                    error_msg = (
-                        f"Token refrescado, pero no se pudo persistir en '{self.token_file}'. "
-                        "Verifica permisos de escritura."
+                    logger.warning(
+                        "Token OAuth refrescado en memoria, pero no se pudo persistir en '%s'. "
+                        "Se continuara con las credenciales renovadas. Error: %s",
+                        self.token_file,
+                        exc,
                     )
-                    logger.error(f"{error_msg} Error: {exc}")
-                    raise RuntimeError(error_msg) from exc
             else:
                 error_msg = (
                     "Credenciales OAuth invalidas o sin refresh_token. "

@@ -341,12 +341,17 @@ git push
 
 En el dashboard de Render, ve a "Environment" y agrega:
 
-- `GOOGLE_TOKEN_FILE` - Ruta a un `token.json` existente y disponible en runtime
+- Un **Secret File** llamado `token.json` con el contenido completo del token OAuth autorizado
+- `GOOGLE_TOKEN_FILE` - `/etc/secrets/token.json` (ruta de Secret Files en runtime)
 - `SUPABASE_PROJECT_ID` - Tu project ID de Supabase
 - `SUPABASE_URL` - URL de tu proyecto Supabase
 - `SUPABASE_KEY` - Tu API key de Supabase
 - `ENVIRONMENT` - `production`
 - `LOG_LEVEL` - `INFO`
+
+Los Secret Files de Render pueden ser de solo lectura. La aplicacion renueva el
+access token en memoria y continua funcionando aunque no pueda sobrescribir
+`/etc/secrets/token.json`; el `refresh_token` original permanece vigente.
 
 ### 4. Desplegar
 
